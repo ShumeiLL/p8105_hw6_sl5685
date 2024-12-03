@@ -83,7 +83,8 @@ homicide_data = homicide_data |>
   mutate(city_state = paste(city, state, sep = ", ")) |>
   filter(!city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL")) |>
   filter(victim_race %in% c("White", "Black")) |>
-  mutate(victim_age = as.numeric(victim_age))
+  mutate(victim_age = as.numeric(victim_age)) |>
+  filter(!is.na(victim_age))
 ```
 
 ```{r}
@@ -129,11 +130,95 @@ ggplot(city_models, aes(x = reorder(city_state, estimate), y = estimate)) +
        x = "City", y = "Odds Ratio (Male vs Female)")
 ```
 
-The plot organizes cities by the estimated odds ratio (OR) of solving homicides for male versus female victims. Cities like Albuquerque, NM, and Stockton, CA, show higher ORs, indicating potentially higher likelihoods of solving homicides involving male victims. Many cities, however, have ORs close to 1, suggesting no significant gender difference, while wide confidence intervals in several cities reflect uncertainty in the estimates.
+The plot organizes cities by the estimated odds ratio (OR) of solving homicides for male versus female victims. Some cities, like Albuquerque, NM, and Stockton, CA, exhibit higher ORs (greater than 1), suggesting that homicides involving male victims are more likely to be solved compared to female victims. Conversely, cities such as New York, NY, and Baton Rouge, LA, have ORs close to 1, indicating little to no difference in the likelihood of solving homicides between male and female victims. Additionally, there are cities where OR values are less than 1, indicating that homicides involving female victims are more likely to be solved compared to male victims. Wide confidence intervals in some cities suggest high variability or limited sample sizes, making it difficult to draw definitive conclusions about gender differences in these locations.
 
 ## Problem 3
 
 ```{r}
+# Import data
 birthweight = read_csv("./data/birthweight.csv")
 ```
 
+```{r}
+# clean the dataset
+birthweight = birthweight |>
+  mutate(
+    babysex = factor(babysex, labels = c("Male", "Female")),
+    frace = factor(frace),
+    malform = factor(malform, labels = c("Absent", "Present")),
+    mrace = factor(mrace)
+  )
+
+# Check for missing data
+missing_data = colSums(is.na(birthweight))
+missing_data
+
+# Remove rows with missing data
+birthweight = birthweight |> drop_na()
+```
+
+```{r}
+# Hypothesized Model for Birthweight
+model = lm(bwt ~ bhead + blength + gaweeks + momage + ppwt + wtgain, data = birthweight)
+summary(model)
+
+# Cross-Validation
+set.seed(123)
+cv_data = crossv_mc(birthweight, 100)
+
+# Apply Model to Cross-Validation Data
+cv_data = cv_data |>
+  mutate(
+    model = map(train, ~ lm(bwt ~ bhead + blength + gaweeks + momage + ppwt + wtgain, data = .x)),
+    rmse = map2_dbl(model, test, ~ rmse(.x, .y))
+  )
+
+mean_rmse = mean(cv_data$rmse)
+
+# Residual Plot
+model_predictions = add_predictions(birthweight, model)
+model_residuals = add_residuals(model_predictions, model)
+
+ggplot(model_residuals, aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    x = "Predicted Birth Weight",
+    y = "Residuals",
+    title = "Residual Plot for Hypothesized Birth Weight Model"
+  )
+```
+
+```{r}
+# Monte Carlo Cross-Validation for Model Comparison
+set.seed(123)
+monte_carlo_splits = crossv_mc(birthweight, n = 10)
+```
+
+```{r}
+# Fit models to Monte Carlo splits and compute prediction errors
+monte_carlo_results = monte_carlo_splits |>
+  mutate(
+    baseline_model = map(train, ~ lm(bwt ~ babysex + bhead + blength + delwt + gaweeks + ppbmi + smoken, data = as.data.frame(.))),
+    simplified_model = map(train, ~ lm(bwt ~ blength + gaweeks, data = as.data.frame(.))),
+    interaction_model = map(train, ~ lm(bwt ~ bhead * blength * babysex, data = as.data.frame(.))),
+    
+    error_baseline = map2_dbl(baseline_model, test, ~ mean((predict(.x, newdata = as.data.frame(.y)) - as.data.frame(.y)$bwt)^2, na.rm = TRUE)),
+    error_simplified = map2_dbl(simplified_model, test, ~ mean((predict(.x, newdata = as.data.frame(.y)) - as.data.frame(.y)$bwt)^2, na.rm = TRUE)),
+    error_interaction = map2_dbl(interaction_model, test, ~ mean((predict(.x, newdata = as.data.frame(.y)) - as.data.frame(.y)$bwt)^2, na.rm = TRUE))
+  )
+```
+
+```{r}
+# Summarize prediction errors
+monte_carlo_errors = monte_carlo_results |>
+  summarize(
+    hypothesis_mse = mean(error_baseline, na.rm = TRUE),
+    length_ga_mse = mean(error_simplified, na.rm = TRUE),
+    interaction_mse = mean(error_interaction, na.rm = TRUE)
+  )
+
+monte_carlo_errors
+```
+
+The Monte Carlo cross-validation results show that the hypothesis model (which includes head circumference, birth length, maternal weight gain, etc.) has a mean squared error (MSE) of 79299, indicating the best predictive performance among the three models. The length_ga model (which uses only birth length and gestational age) has the highest MSE at 112076, suggesting it does not capture enough features to make accurate predictions. The interaction model (which incorporates head circumference, birth length, and sex with interaction terms) has an MSE of 83574, which is higher than the hypothesis model but lower than the length_ga model. This implies that the interaction terms improve prediction accuracy compared to a simpler model but still do not outperform the more comprehensive hypothesis model.
