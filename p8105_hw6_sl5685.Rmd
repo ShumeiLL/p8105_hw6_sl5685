@@ -10,6 +10,7 @@ library(tidyverse)
 library(modelr)
 library(broom)
 library(rnoaa)
+library(purrr)
 ```
 
 ## Problem 1
@@ -72,8 +73,63 @@ ci_log_beta0_beta1
 ## Problem 2
 
 ```{r}
-homicides = read_csv("./data/homicide-data.csv")
+# Import data
+homicide_data = read_csv("./data/homicide-data.csv")
 ```
+
+```{r}
+# Create city_state variable and filter the dataset
+homicide_data = homicide_data |>
+  mutate(city_state = paste(city, state, sep = ", ")) |>
+  filter(!city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL")) |>
+  filter(victim_race %in% c("White", "Black")) |>
+  mutate(victim_age = as.numeric(victim_age))
+```
+
+```{r}
+# Filter data for Baltimore, MD
+baltimore_data = homicide_data |>
+  filter(city_state == "Baltimore, MD")
+
+# Fit logistic regression model for Baltimore, MD
+model_baltimore = glm(disposition == "Closed by arrest" ~ victim_age + victim_sex + victim_race, 
+                       data = baltimore_data, family = "binomial")
+
+# Tidy the model output and extract odds ratio for male victims
+tidy_baltimore = tidy(model_baltimore, exponentiate = TRUE, conf.int = TRUE)
+
+# Extract odds ratio for male vs female victims
+odds_ratio_sex = tidy_baltimore |>
+  filter(term == "victim_sexMale")
+odds_ratio_sex
+```
+
+```{r}
+# Fit logistic regression model for each city in the dataset and extract adjusted odds ratios
+city_models = homicide_data |>
+  group_by(city_state) |>
+  nest() |>
+  mutate(model = 
+           map(data, ~ glm(disposition == "Closed by arrest" ~ 
+                             victim_age + victim_sex + victim_race, 
+                           data = ., family = "binomial")),
+         tidy_model = map(model, tidy, exponentiate = TRUE, conf.int = TRUE)) |>
+  unnest(tidy_model) |>
+  filter(term == "victim_sexMale") |>
+  select(city_state, estimate, conf.low, conf.high)
+```
+
+```{r}
+# Plot odds ratios and confidence intervals
+ggplot(city_models, aes(x = reorder(city_state, estimate), y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  coord_flip() +
+  labs(title = "Adjusted Odds Ratios for Solving Homicides (Male vs Female Victims)",
+       x = "City", y = "Odds Ratio (Male vs Female)")
+```
+
+The plot organizes cities by the estimated odds ratio (OR) of solving homicides for male versus female victims. Cities like Albuquerque, NM, and Stockton, CA, show higher ORs, indicating potentially higher likelihoods of solving homicides involving male victims. Many cities, however, have ORs close to 1, suggesting no significant gender difference, while wide confidence intervals in several cities reflect uncertainty in the estimates.
 
 ## Problem 3
 
