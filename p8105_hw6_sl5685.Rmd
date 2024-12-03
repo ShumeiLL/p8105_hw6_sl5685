@@ -199,12 +199,12 @@ monte_carlo_splits = crossv_mc(birthweight, n = 10)
 # Fit models to Monte Carlo splits and compute prediction errors
 monte_carlo_results = monte_carlo_splits |>
   mutate(
-    baseline_model = map(train, ~ lm(bwt ~ babysex + bhead + blength + delwt + gaweeks + ppbmi + smoken, data = as.data.frame(.))),
-    simplified_model = map(train, ~ lm(bwt ~ blength + gaweeks, data = as.data.frame(.))),
+    hypothesis_model = map(train, ~ lm(bwt ~ babysex + bhead + blength + delwt + gaweeks + ppbmi + smoken, data = as.data.frame(.))),
+    length_ga_model = map(train, ~ lm(bwt ~ blength + gaweeks, data = as.data.frame(.))),
     interaction_model = map(train, ~ lm(bwt ~ bhead * blength * babysex, data = as.data.frame(.))),
     
-    error_baseline = map2_dbl(baseline_model, test, ~ mean((predict(.x, newdata = as.data.frame(.y)) - as.data.frame(.y)$bwt)^2, na.rm = TRUE)),
-    error_simplified = map2_dbl(simplified_model, test, ~ mean((predict(.x, newdata = as.data.frame(.y)) - as.data.frame(.y)$bwt)^2, na.rm = TRUE)),
+    error_hypothesis = map2_dbl(hypothesis_model, test, ~ mean((predict(.x, newdata = as.data.frame(.y)) - as.data.frame(.y)$bwt)^2, na.rm = TRUE)),
+    error_length_ga = map2_dbl(length_ga_model, test, ~ mean((predict(.x, newdata = as.data.frame(.y)) - as.data.frame(.y)$bwt)^2, na.rm = TRUE)),
     error_interaction = map2_dbl(interaction_model, test, ~ mean((predict(.x, newdata = as.data.frame(.y)) - as.data.frame(.y)$bwt)^2, na.rm = TRUE))
   )
 ```
@@ -213,8 +213,8 @@ monte_carlo_results = monte_carlo_splits |>
 # Summarize prediction errors
 monte_carlo_errors = monte_carlo_results |>
   summarize(
-    hypothesis_mse = mean(error_baseline, na.rm = TRUE),
-    length_ga_mse = mean(error_simplified, na.rm = TRUE),
+    hypothesis_mse = mean(error_hypothesis, na.rm = TRUE),
+    length_ga_mse = mean(error_length_ga, na.rm = TRUE),
     interaction_mse = mean(error_interaction, na.rm = TRUE)
   )
 
